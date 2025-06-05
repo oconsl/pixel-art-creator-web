@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Pixel Art Creator</title>
+    <style>
+      :root {
+        --bg: oklch(21% 0.02 270);
+        --panel: oklch(30% 0.02 270);
+        --text: oklch(95% 0 0);
+        --accent: oklch(75% 0.2 30);
+        --cell-border: oklch(90% 0.03 270);
+        --disabled-opacity: 0.5;
+      }
+
+      body {
+        margin: 0;
+        font-family: "Segoe UI", sans-serif;
+        background-color: var(--bg);
+        color: var(--text);
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        padding: 2em;
+        overflow-y: hidden;
+      }
+
+      h1 {
+        margin-bottom: 0.5em;
+        font-weight: 600;
+      }
+
+      .layout__container {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 2em;
+        max-width: 1000px;
+        width: 100%;
+        justify-content: center;
+      }
+
+      .main__content {
+        display: flex;
+        flex-direction: column;
+        gap: 1em;
+        flex: 1;
+        align-items: center;
+        justify-content: center;
+      }
+
+      .timer {
+        position: fixed;
+        top: 1em;
+        right: 1em;
+        background-color: var(--accent);
+        color: black;
+        padding: 0.6em 1em;
+        border-radius: 0.6em;
+        font-weight: bold;
+        display: none;
+        z-index: 10;
+      }
+
+      .palette {
+        display: grid;
+        grid-template-columns: repeat(5, 1fr);
+        background-color: var(--panel);
+        border-radius: 12px;
+        padding: 1.5em;
+        gap: 1em;
+        align-content: center;
+        height: fit-content;
+        position: fixed;
+        right: 2em;
+        top: 50%;
+        transform: translateY(-50%);
+        z-index: 5;
+      }
+
+      .palette__color {
+        width: 35px;
+        height: 35px;
+        border-radius: 50%;
+        border: 2px solid white;
+        cursor: pointer;
+        transition: transform 0.2s, border-color 0.2s;
+        box-sizing: border-box;
+      }
+
+      .palette__color:hover,
+      .palette__color:focus-visible {
+        transform: scale(1.1);
+        outline: none;
+      }
+
+      .palette__color--selected {
+        border: 3px solid var(--accent);
+      }
+
+      .palette--disabled .palette__color {
+        opacity: var(--disabled-opacity);
+        pointer-events: none;
+        cursor: not-allowed;
+      }
+
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(32, 20px);
+        grid-template-rows: repeat(32, 20px);
+        background-color: var(--panel);
+        padding: 0.5em;
+        border-radius: 0.8em;
+        place-items: center;
+      }
+
+      .grid__cell {
+        width: 20px;
+        height: 20px;
+        background-color: white;
+        border: 1px solid var(--cell-border);
+        cursor: pointer;
+      }
+
+      .grid--disabled .grid__cell {
+        opacity: 1;
+        pointer-events: none;
+        filter: grayscale(30%) brightness(0.9);
+      }
+
+      .status {
+        font-size: 0.9em;
+        color: #ccc;
+        display: flex;
+        align-items: center;
+        gap: 0.5em;
+      }
+
+      .status__color {
+        width: 14px;
+        height: 14px;
+        border-radius: 50%;
+        display: inline-block;
+        border: 1px solid #999;
+      }
+
+      @media (width <= 768px) {
+        .grid {
+          grid-template-columns: repeat(32, 12px);
+          grid-template-rows: repeat(32, 12px);
+        }
+
+        .grid__cell {
+          width: 12px;
+          height: 12px;
+        }
+
+        .palette__color {
+          width: 28px;
+          height: 28px;
+        }
+      }
+
+      @media (width <= 1280px) {
+        .palette {
+          grid-template-columns: repeat(4, 1fr);
+        }
+
+        .grid {
+          grid-template-columns: repeat(32, 16px);
+          grid-template-rows: repeat(32, 16px);
+        }
+
+        .grid__cell {
+          width: 16px;
+          height: 16px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <h1>🎨 Pixel Art Creator</h1>
+    <div class="timer" id="timer">3</div>
+
+    <div class="layout__container">
+      <div class="main__content">
+        <div class="status" id="status-message">
+          <span id="color-indicator" class="status__color"></span>
+          <span>Selecciona un color y pinta en la cuadrícula</span>
+        </div>
+        <div class="grid" id="grid-container"></div>
+      </div>
+
+      <aside class="palette" id="color-palette"></aside>
+    </div>
+
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+    <script>
+      const socket = io("http://localhost:3000");
+
+      const TIMER_INTERVAL = 3;
+
+      const colors = [
+        // Neutrales
+        "oklch(100% 0 0)", // Blanco
+        "oklch(85% 0.02 0)", // Gris claro
+        "oklch(65% 0.02 0)", // Gris medio
+        "oklch(30% 0 0)", // Gris oscuro
+        "oklch(0% 0 0)", // Casi negro
+
+        // Rojos y rosados
+        "oklch(75% 0.2 0)",
+        "oklch(65% 0.15 10)",
+        "oklch(85% 0.1 0)",
+        "oklch(70% 0.25 15)",
+        "oklch(90% 0.05 10)",
+
+        // Naranjas
+        "oklch(80% 0.15 30)",
+        "oklch(70% 0.2 40)",
+        "oklch(90% 0.1 35)",
+        "oklch(65% 0.25 30)",
+        "oklch(75% 0.18 25)",
+
+        // Amarillos
+        "oklch(90% 0.2 80)",
+        "oklch(75% 0.2 90)",
+        "oklch(85% 0.15 95)",
+        "oklch(70% 0.2 85)",
+        "oklch(65% 0.25 75)",
+
+        // Verdes
+        "oklch(75% 0.25 120)",
+        "oklch(70% 0.2 135)",
+        "oklch(65% 0.2 150)",
+        "oklch(80% 0.15 130)",
+        "oklch(60% 0.18 140)",
+
+        // Turquesas
+        "oklch(65% 0.2 180)",
+        "oklch(75% 0.15 190)",
+        "oklch(85% 0.1 170)",
+        "oklch(70% 0.2 200)",
+        "oklch(60% 0.25 185)",
+
+        // Azules
+        "oklch(75% 0.2 240)",
+        "oklch(65% 0.15 225)",
+        "oklch(80% 0.1 250)",
+        "oklch(70% 0.18 260)",
+        "oklch(60% 0.2 245)",
+
+        // Violetas y púrpuras
+        "oklch(70% 0.2 270)",
+        "oklch(60% 0.1 280)",
+        "oklch(80% 0.15 300)",
+        "oklch(65% 0.2 315)",
+        "oklch(75% 0.2 330)",
+
+        // Rosados
+        "oklch(85% 0.07 340)",
+        "oklch(70% 0.15 350)",
+        "oklch(75% 0.25 5)",
+        "oklch(65% 0.2 355)",
+        "oklch(90% 0.1 10)",
+
+        // Pasteles varios (extras útiles)
+        "oklch(90% 0.05 270)",
+        "oklch(85% 0.07 80)",
+        "oklch(50% 0.1 200)",
+        "oklch(75% 0.1 45)",
+        "oklch(70% 0.1 120)",
+      ];
+
+      const colorPalette = document.getElementById("color-palette");
+      const gridContainer = document.getElementById("grid-container");
+      const timerElement = document.getElementById("timer");
+      const statusMessage = document.getElementById("status-message");
+      const colorIndicator = document.getElementById("color-indicator");
+
+      let selectedColor = null;
+      let isTimeout = false;
+      let secondsLeft = TIMER_INTERVAL;
+      let timerInterval;
+
+      function createColorPalette() {
+        colors.forEach((color) => {
+          const el = document.createElement("button");
+          el.className = "palette__color";
+          el.style.backgroundColor = color;
+          el.setAttribute("aria-label", `Color ${color}`);
+          el.addEventListener("click", () => selectColor(el, color));
+          colorPalette.appendChild(el);
+        });
+      }
+
+      function selectColor(el, color) {
+        if (isTimeout) return;
+        document
+          .querySelectorAll(".palette__color--selected")
+          .forEach((c) => c.classList.remove("palette__color--selected"));
+        el.classList.add("palette__color--selected");
+        selectedColor = color;
+        colorIndicator.style.backgroundColor = color;
+        statusMessage.querySelector(
+          "span:last-child"
+        ).textContent = ` ${color}`;
+      }
+
+      function createGrid() {
+        for (let y = 0; y < 32; y++) {
+          for (let x = 0; x < 32; x++) {
+            const cell = document.createElement("div");
+            cell.className = "grid__cell";
+            cell.dataset.x = x;
+            cell.dataset.y = y;
+            cell.addEventListener("click", () => {
+              if (isTimeout || !selectedColor) return;
+              paintCell(cell, selectedColor);
+              socket.emit("draw_cell", { x, y, color: selectedColor });
+              startTimeout();
+            });
+            gridContainer.appendChild(cell);
+          }
+        }
+      }
+
+      function paintCell(cell, color) {
+        cell.style.backgroundColor = color;
+      }
+
+      function startTimeout() {
+        isTimeout = true;
+        secondsLeft = TIMER_INTERVAL;
+        timerElement.style.display = "block";
+        colorPalette.classList.add("palette--disabled");
+        gridContainer.classList.add("grid--disabled");
+        timerElement.textContent = secondsLeft;
+        statusMessage.querySelector(
+          "span:last-child"
+        ).textContent = ` Espera ${TIMER_INTERVAL} segundos...`;
+        colorIndicator.style.backgroundColor = "transparent";
+
+        timerInterval = setInterval(() => {
+          secondsLeft--;
+          timerElement.textContent = secondsLeft;
+          if (secondsLeft <= 0) endTimeout();
+        }, 1000);
+      }
+
+      function endTimeout() {
+        clearInterval(timerInterval);
+        isTimeout = false;
+        timerElement.style.display = "none";
+        colorPalette.classList.remove("palette--disabled");
+        gridContainer.classList.remove("grid--disabled");
+        statusMessage.querySelector("span:last-child").textContent =
+          " Selecciona un color y pinta en la cuadrícula";
+      }
+
+      function clearBoard() {
+        document.querySelectorAll(".grid__cell").forEach((cell) => {
+          cell.style.backgroundColor = "#ffffff";
+        });
+      }
+
+      socket.on("cell_updated", ({ x, y, color }) => {
+        const cell = document.querySelector(
+          `.grid__cell[data-x="${x}"][data-y="${y}"]`
+        );
+        if (cell) paintCell(cell, color);
+      });
+
+      socket.on("board_cleared", () => {
+        clearBoard();
+      });
+
+      window.onload = () => {
+        createColorPalette();
+        createGrid();
+      };
+    </script>
+  </body>
+</html>
